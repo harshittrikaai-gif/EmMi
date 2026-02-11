@@ -125,7 +125,7 @@ class DataPreprocessor:
         """Return ``True`` if the document passes quality heuristics."""
 
         # Length bounds
-        if len(text) < 100 or len(text) > 1_000_000:
+        if len(text) < 20 or len(text) > 1_000_000:
             return False
 
         # Average word length sanity check

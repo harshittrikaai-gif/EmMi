@@ -158,11 +158,12 @@ cython_debug/
 .vscode/
 
 # Project Specific
-data/sample/
-data/sample_tiny/
-data/tokenizer_train.txt
+data/
 outputs/
 tokenizers/
 *.pt
 *.model
 *.vocab
+*.png
+*.img
+*.log

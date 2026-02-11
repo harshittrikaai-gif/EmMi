@@ -24,6 +24,7 @@ from torch.utils.data import DataLoader
 
 from emmit.model.config import EmmitConfig
 from emmit.training.checkpointing import load_checkpoint, save_checkpoint
+from emmit.training.live_monitor import NeuralMetricsMonitor
 
 
 class EmmitTrainer:
@@ -37,6 +38,7 @@ class EmmitTrainer:
         eval_dataloader: Optional[DataLoader] = None,
         output_dir: str | Path = "outputs",
         resume_from: Optional[str | Path] = None,
+        monitor: Optional[NeuralMetricsMonitor] = None,
     ):
         self.model = model
         self.config = config
@@ -44,6 +46,7 @@ class EmmitTrainer:
         self.eval_dl = eval_dataloader
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.monitor = monitor
 
         self.device = next(model.parameters()).device
 
@@ -119,7 +122,11 @@ class EmmitTrainer:
 
         self.optimizer.zero_grad(set_to_none=True)
         accum_loss = 0.0
-        accum_aux = {"load_balancing_loss": 0.0, "z_loss": 0.0}
+        accum_aux = {
+            "load_balancing_loss": 0.0, 
+            "z_loss": 0.0,
+            "expert_utilization": torch.zeros(self.config.num_experts, device=self.device)
+        }
 
         while self.global_step < self.config.max_steps:
             lr = self._update_lr(self.global_step)
@@ -152,7 +159,10 @@ class EmmitTrainer:
 
                 accum_loss += outputs["loss"].item() / accum_steps
                 for k in accum_aux:
-                    accum_aux[k] += outputs["aux_loss"][k].item() / accum_steps
+                    if k == "expert_utilization":
+                        accum_aux[k] += outputs["aux_loss"][k] / accum_steps
+                    else:
+                        accum_aux[k] += outputs["aux_loss"][k].item() / accum_steps
 
             # Gradient clipping
             if self.scaler is not None:
@@ -175,15 +185,27 @@ class EmmitTrainer:
             if self.global_step % self.config.logging_steps == 0:
                 print(
                     f"  step {self.global_step:>7d} | "
-                    f"loss {accum_loss:.4f} | "
-                    f"lb_loss {accum_aux['load_balancing_loss']:.4f} | "
-                    f"z_loss {accum_aux['z_loss']:.4f} | "
                     f"lr {lr:.2e}"
                 )
+                
+                if self.monitor:
+                    # Normalize utilization by logging_steps
+                    final_util = (accum_aux['expert_utilization'] / self.config.logging_steps).tolist()
+                    self.monitor.log_step(self.global_step, {
+                        "loss": accum_loss,
+                        "lb_loss": accum_aux['load_balancing_loss'],
+                        "z_loss": accum_aux['z_loss'],
+                        "expert_utilization": final_util,
+                        "lr": lr
+                    })
 
             # Reset accumulators
             accum_loss = 0.0
-            accum_aux = {"load_balancing_loss": 0.0, "z_loss": 0.0}
+            accum_aux = {
+                "load_balancing_loss": 0.0, 
+                "z_loss": 0.0,
+                "expert_utilization": torch.zeros(self.config.num_experts, device=self.device)
+            }
 
             # Evaluation
             if self.eval_dl and self.global_step % self.config.eval_steps == 0:
@@ -209,6 +231,8 @@ class EmmitTrainer:
             self.output_dir,
             max_keep=self.config.max_checkpoints,
         )
+        if self.monitor:
+            self.monitor.mark_complete()
         print(f"[Trainer] Training complete at step {self.global_step}")
 
     # ------------------------------------------------------------------

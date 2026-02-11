@@ -1,0 +1,17 @@
+model:
+  name: "emmit-multimodal-test"
+  hidden_size: 256
+  num_layers: 4
+  num_attention_heads: 4
+  num_key_value_heads: 1
+  vocab_size: 500  # Sync with test_tokenizer
+  vision_enabled: True
+  vision_hidden_size: 256
+  vision_num_layers: 2
+  image_size: 224
+  patch_size: 16
+
+training:
+  batch_size: 1
+  mixed_precision: "no"
+  max_steps: 1

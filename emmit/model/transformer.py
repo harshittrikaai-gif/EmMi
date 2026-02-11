@@ -17,6 +17,7 @@ from emmit.model.attention import GroupedQueryAttention
 from emmit.model.config import EmmitConfig
 from emmit.model.moe import MoEFeedForward
 from emmit.model.norms import RMSNorm
+from emmit.model.vision import VisionEncoder
 
 
 class EmmitTransformerBlock(nn.Module):
@@ -107,6 +108,18 @@ class EmmitModel(nn.Module):
         # Final norm
         self.norm = RMSNorm(config.hidden_size)
 
+        # Vision Encoder (optional)
+        self.vision_encoder = None
+        if config.vision_enabled:
+            self.vision_encoder = VisionEncoder(
+                image_size=config.image_size,
+                patch_size=config.patch_size,
+                hidden_size=config.vision_hidden_size,
+                num_layers=config.vision_num_layers,
+                num_heads=config.num_attention_heads, # Use same heads for simplicity or add vision_num_heads
+                projection_dim=config.hidden_size,
+            )
+
         # Language model head (weight-tied with embedding)
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
@@ -149,21 +162,37 @@ class EmmitModel(nn.Module):
             input_ids:      [batch, seq_len]
             attention_mask: optional [batch, 1, seq_len, seq_len] or None
             labels:         [batch, seq_len]  (shifted inside this method)
-            pixel_values:   optional [batch, 3, H, W]  (unused until vision is wired)
-
-        Returns:
-            dict with ``logits``, ``loss`` (if labels), ``aux_loss``
+            pixel_values:   optional [batch, 3, H, W]
         """
+        batch_size, seq_len = input_ids.shape
         hidden_states = self.embed_tokens(input_ids)  # [B, S, H]
+
+        # --- Vision Integration (Multimodal) ---
+        if pixel_values is not None and self.vision_encoder is not None:
+            vision_tokens = self.vision_encoder(pixel_values) # [B, num_v, H]
+            # Simple prepend: [vision tokens, text tokens]
+            hidden_states = torch.cat([vision_tokens, hidden_states], dim=1)
+            
+            # Update attention mask to include vision prefix
+            if attention_mask is not None:
+                if attention_mask.dim() == 2:
+                    v_mask = torch.ones(
+                        (batch_size, vision_tokens.shape[1]), 
+                        device=attention_mask.device, 
+                        dtype=attention_mask.dtype
+                    )
+                    attention_mask = torch.cat([v_mask, attention_mask], dim=1)
 
         # Accumulate auxiliary losses across layers
         total_load_loss = torch.tensor(0.0, device=hidden_states.device)
         total_z_loss = torch.tensor(0.0, device=hidden_states.device)
+        total_utilization = torch.zeros(self.config.num_experts, device=hidden_states.device)
 
         for layer in self.layers:
             hidden_states, aux = layer(hidden_states, attention_mask)
             total_load_loss = total_load_loss + aux["load_balancing_loss"]
             total_z_loss = total_z_loss + aux["z_loss"]
+            total_utilization = total_utilization + aux["expert_utilization"]
 
         hidden_states = self.norm(hidden_states)
 
@@ -174,6 +203,7 @@ class EmmitModel(nn.Module):
         aux_loss = {
             "load_balancing_loss": total_load_loss / num_layers,
             "z_loss": total_z_loss / num_layers,
+            "expert_utilization": total_utilization / num_layers,
         }
 
         result: Dict[str, torch.Tensor] = {

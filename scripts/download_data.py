@@ -7,37 +7,29 @@ FASTEST option - no processing needed!
 import os
 from tqdm import tqdm
 
+# Pre-cleaned, high-quality datasets (using modern HF formats)
 # Pre-cleaned, high-quality datasets
 DATASETS = {
     'en': {
-        'name': 'wikipedia',
-        'config': '20220301.en',
-        'split': 'train[:100000]',  # First 100K articles
-        'text_column': 'text'
+        'name': 'wikitext',
+        'config': 'wikitext-103-v1',
+        'split': 'train',
+        'text_column': 'text',
+        'limit': 5000
     },
     'hi': {
-        'name': 'ai4bharat/IndicCorp',
-        'config': 'hi',
-        'split': 'train[:100000]',
-        'text_column': 'text'
+        'name': 'vukuzmanovic/hindi-wikipedia-clean',
+        'config': None,
+        'split': 'train',
+        'text_column': 'text',
+        'limit': 5000
     },
     'bn': {
         'name': 'ai4bharat/IndicCorp',
         'config': 'bn',
-        'split': 'train[:50000]',
-        'text_column': 'text'
-    },
-    'ta': {
-        'name': 'ai4bharat/IndicCorp',
-        'config': 'ta',
-        'split': 'train[:50000]',
-        'text_column': 'text'
-    },
-    'te': {
-        'name': 'ai4bharat/IndicCorp',
-        'config': 'te',
-        'split': 'train[:50000]',
-        'text_column': 'text'
+        'split': 'train',
+        'text_column': 'text',
+        'limit': 5000
     }
 }
 
@@ -56,15 +48,17 @@ def download_dataset(lang, output_dir='data/raw'):
     
     config = DATASETS[lang]
     
-    print(f"\n📥 Downloading {lang.upper()} dataset...")
+    print(f"\n[INFO] Downloading {lang.upper()} dataset...")
     print(f"   Source: {config['name']}")
     
     try:
-        # Load dataset
+        # Load dataset with streaming to save memory
+        # Note: trust_remote_code=True is needed for some configs
         dataset = load_dataset(
             config['name'],
             config.get('config'),
             split=config['split'],
+            streaming=True,
             trust_remote_code=True
         )
         
@@ -72,8 +66,8 @@ def download_dataset(lang, output_dir='data/raw'):
         output_file = os.path.join(output_dir, f'{lang}.txt')
         os.makedirs(output_dir, exist_ok=True)
         
-        print(f"   Processing {len(dataset):,} examples...")
-        
+        limit = config.get('limit', 5000)
+        count = 0
         with open(output_file, 'w', encoding='utf-8') as f:
             for example in tqdm(dataset, desc=f"Writing {lang}"):
                 text = example[config['text_column']]
@@ -82,17 +76,16 @@ def download_dataset(lang, output_dir='data/raw'):
                 sentences = text.split('\n')
                 for sent in sentences:
                     sent = sent.strip()
-                    if len(sent) > 20:  # Filter short sentences
+                    if len(sent) > 40:  # Higher threshold for better quality
                         f.write(sent + '\n')
+                
+                count += 1
+                if count >= limit:
+                    break
         
         file_size = os.path.getsize(output_file) / 1024 / 1024
-        print(f"✅ Saved to {output_file}")
+        print(f"✅ Saved {count:,} examples to {output_file}")
         print(f"   File size: {file_size:.1f} MB")
-        
-        # Count lines
-        with open(output_file, 'r', encoding='utf-8') as f:
-            num_lines = sum(1 for _ in f)
-        print(f"   Total sentences: {num_lines:,}")
         
         return output_file
         
@@ -112,9 +105,9 @@ def main():
                        help='Output directory')
     args = parser.parse_args()
     
-    print("🚀 Emmit AI - Fast Dataset Downloader")
+    print("Emmit AI - Fast Dataset Downloader")
     print("=" * 60)
-    print("\n⚠️  Make sure you have 'datasets' installed:")
+    print("\n[NOTE] Make sure you have 'datasets' installed:")
     print("   pip install datasets")
     print("\n")
     
@@ -122,9 +115,9 @@ def main():
         download_dataset(lang, args.output_dir)
     
     print("\n" + "=" * 60)
-    print("✅ Download complete!")
-    print(f"\n📁 Your data is in: {args.output_dir}/")
-    print("\n🎯 Next step:")
+    print("Download complete!")
+    print(f"\n[PATH] Your data is in: {args.output_dir}/")
+    print("\n[NEXT STEP]")
     print("   python scripts/train_tokenizer.py --data_path data/raw/<lang>.txt --vocab_size 32000 --output tokenizers/my_tokenizer")
 
 if __name__ == '__main__':

@@ -26,6 +26,8 @@ from emmit.model.config import EmmitConfig
 from emmit.model.transformer import EmmitModel
 from emmit.data.dataset import EmmitDataset
 from emmit.training.trainer import EmmitTrainer
+from emmit.training.quantization import apply_8bit_quantization
+from emmit.training.live_monitor import NeuralMetricsMonitor
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,6 +38,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--max_steps", type=int, default=None, help="Override max_steps from config")
     p.add_argument("--resume_from", type=str, default=None, help="Checkpoint path to resume from")
     p.add_argument("--generate_sample_data", action="store_true", help="Generate random sample data for testing")
+    p.add_argument("--monitor", action="store_true", help="Enable live metrics monitoring for UI")
+    p.add_argument("--quantize", action="store_true", help="Enable 8-bit expert quantization")
     return p.parse_args()
 
 
@@ -99,6 +103,11 @@ def main() -> None:
 
     # Model
     model = EmmitModel(config)
+    
+    # Quantize (if enabled)
+    if args.quantize:
+        model = apply_8bit_quantization(model)
+        
     total_params = model.num_parameters()
     active_params = model.num_active_parameters()
     print(f"[Model] Total parameters : {total_params:>14,}")
@@ -110,6 +119,9 @@ def main() -> None:
     else:
         model = model.to(device)
 
+    # Monitor
+    monitor = NeuralMetricsMonitor() if args.monitor else None
+
     # Train
     trainer = EmmitTrainer(
         model=model,
@@ -117,6 +129,7 @@ def main() -> None:
         train_dataloader=dataloader,
         output_dir=args.output_dir,
         resume_from=args.resume_from,
+        monitor=monitor,
     )
 
     trainer.train()

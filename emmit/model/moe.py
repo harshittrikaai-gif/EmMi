@@ -98,9 +98,15 @@ class MoERouter(nn.Module):
         # --- Z-loss: penalise large logits ---
         z_loss = torch.logsumexp(router_logits, dim=-1).square().mean()
 
+        # --- Expert Utilization (for monitoring) ---
+        # count how many tokens chose each expert as top-1
+        counts = torch.bincount(top1_expert, minlength=self.num_experts).float()
+        utilization = counts / num_tokens
+
         return {
             "load_balancing_loss": load_balancing_loss,
             "z_loss": z_loss,
+            "expert_utilization": utilization
         }
 
 
