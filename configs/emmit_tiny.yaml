@@ -31,26 +31,18 @@ model:
   attention_dropout: 0.0
 
 training:
-  batch_size: 2
-  gradient_accumulation_steps: 8   # Effective batch: 16
-  max_steps: 10000
-  learning_rate: 3.0e-4
-  min_learning_rate: 3.0e-5
-  weight_decay: 0.1
-  warmup_steps: 1000
-  lr_scheduler: "cosine"
-  max_grad_norm: 1.0
-
-  # Precision
-  mixed_precision: "bf16"
-  gradient_checkpointing: true
-
-  # Logging & saving
+  batch_size: 4
+  gradient_accumulation_steps: 4
+  max_steps: 50
+  learning_rate: 1.0e-3
+  warmup_steps: 10
+  mixed_precision: "no"
+  gradient_checkpointing: false
+  logging_steps: 5
   eval_steps: 100
-  save_steps: 500
-  logging_steps: 10
+  save_steps: 50
+  max_seq_len: 256
   max_checkpoints: 3
 
   # Data
-  max_seq_len: 2048
   pack_sequences: true

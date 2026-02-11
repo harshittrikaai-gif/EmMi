@@ -1,6 +1,6 @@
 [project]
 name = "emmit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Emmit AI - Mixture of Experts Multilingual Vision-Language Model"
 requires-python = ">=3.10"
 dependencies = [
@@ -25,8 +25,8 @@ flash = [
 ]
 
 [build-system]
-requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["emmit*"]
