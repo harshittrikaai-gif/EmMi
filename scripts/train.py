@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def generate_sample_data(data_dir: str, vocab_size: int, max_seq_len: int, num_samples: int = 1000) -> None:
+def generate_sample_data(data_dir: str, vocab_size: int, max_seq_len: int, num_samples: int = 50) -> None:
     """Generate random token data for smoke testing."""
     data_path = Path(data_dir)
     data_path.mkdir(parents=True, exist_ok=True)
