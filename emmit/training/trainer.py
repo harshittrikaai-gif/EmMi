@@ -199,13 +199,13 @@ class EmmitTrainer:
                         "lr": lr
                     })
 
-            # Reset accumulators
-            accum_loss = 0.0
-            accum_aux = {
-                "load_balancing_loss": 0.0, 
-                "z_loss": 0.0,
-                "expert_utilization": torch.zeros(self.config.num_experts, device=self.device)
-            }
+                # Reset accumulators
+                accum_loss = 0.0
+                accum_aux = {
+                    "load_balancing_loss": 0.0, 
+                    "z_loss": 0.0,
+                    "expert_utilization": torch.zeros(self.config.num_experts, device=self.device)
+                }
 
             # Evaluation
             if self.eval_dl and self.global_step % self.config.eval_steps == 0:
