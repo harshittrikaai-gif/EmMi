@@ -116,7 +116,7 @@ class EmmitModel(nn.Module):
                 patch_size=config.patch_size,
                 hidden_size=config.vision_hidden_size,
                 num_layers=config.vision_num_layers,
-                num_heads=config.num_attention_heads, # Use same heads for simplicity or add vision_num_heads
+                num_heads=config.vision_num_heads,
                 projection_dim=config.hidden_size,
             )
 

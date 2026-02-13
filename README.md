@@ -58,8 +58,7 @@ python scripts/train.py --config configs/emmit_tiny.yaml --generate_sample_data
 ### 3. Run Unit Tests
 Validate all core modules:
 ```bash
-python -m pytest tests/ -v
-```
+![alt text](image.png)
 
 ---
 

@@ -41,24 +41,25 @@ class VisionEncoder(nn.Module):
         )
         self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         
-        # Projection to LM space
-        self.projector = nn.Linear(hidden_size, projection_dim)
+        # Advanced Projector (2-layer MLP with GeLU)
+        self.projector = nn.Sequential(
+            nn.Linear(hidden_size, projection_dim),
+            nn.GELU(),
+            nn.Linear(projection_dim, projection_dim)
+        )
         
     def forward(self, pixel_values: torch.Tensor) -> torch.Tensor:
         """
-        Args:
-            pixel_values: [batch, 3, H, W]
-        Returns:
-            [batch, num_patches, projection_dim]
+        Processes images into tokens compatible with the LM.
         """
         # 1. Patchify
-        x = self.patch_embed(pixel_values) # [B, H, H/p, W/p]
-        x = x.flatten(2).transpose(1, 2) # [B, num_patches, H]
+        x = self.patch_embed(pixel_values) # [B, H_v, H/p, W/p]
+        x = x.flatten(2).transpose(1, 2)   # [B, num_patches, H_v]
         
         # 2. Add class token
         b = x.shape[0]
         cls_tokens = self.class_token.expand(b, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1) # [B, num_patches + 1, H]
+        x = torch.cat((cls_tokens, x), dim=1) # [B, num_patches + 1, H_v]
         
         # 3. Add positioning
         x = x + self.pos_embed
@@ -67,7 +68,7 @@ class VisionEncoder(nn.Module):
         x = self.transformer(x)
         
         # 5. Extract patch features (excluding class token for interleaving)
-        patch_features = x[:, 1:, :] # [B, num_patches, H]
+        patch_features = x[:, 1:, :] # [B, num_patches, H_v]
         
-        # 6. Project to LM size
+        # 6. Project to LM size via MLP
         return self.projector(patch_features)

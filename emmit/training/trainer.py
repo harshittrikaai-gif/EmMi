@@ -145,10 +145,7 @@ class EmmitTrainer:
                 with torch.amp.autocast(
                     "cuda", dtype=self.amp_dtype, enabled=self.use_amp
                 ):
-                    outputs = self.model(
-                        input_ids=batch["input_ids"],
-                        labels=batch["labels"],
-                    )
+                    outputs = self.model(**batch)
                     loss = outputs["total_loss"] / accum_steps
 
                 # Backward
@@ -252,10 +249,7 @@ class EmmitTrainer:
             with torch.amp.autocast(
                 "cuda", dtype=self.amp_dtype, enabled=self.use_amp
             ):
-                outputs = self.model(
-                    input_ids=batch["input_ids"],
-                    labels=batch["labels"],
-                )
+                outputs = self.model(**batch)
             total_loss += outputs["loss"].item()
             count += 1
 

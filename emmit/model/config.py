@@ -43,6 +43,7 @@ class EmmitConfig:
     vision_enabled: bool = False
     vision_hidden_size: int = 512
     vision_num_layers: int = 6
+    vision_num_heads: int = 8
     image_size: int = 336
     patch_size: int = 14
 
