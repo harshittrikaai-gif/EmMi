@@ -1,0 +1,51 @@
+# Nova Sunya 1.2T Fine-tuning Configuration
+# Optimized for high-quality instruction following
+
+model:
+  name: "nova-sunya-1.2t-finetune"
+  
+  # Core Transformer (Inherited from base 1.2T)
+  hidden_size: 7168
+  num_layers: 80
+  num_attention_heads: 56
+  num_key_value_heads: 8
+  ffn_hidden_size: 19456
+  vocab_size: 128000
+  
+  # MoE
+  num_experts: 32
+  num_experts_per_token: 2
+  router_aux_loss_coef: 0.001
+  router_z_loss_coef: 0.0001
+  
+  # Vision
+  vision_enabled: true
+  vision_hidden_size: 1152
+  vision_num_layers: 27
+  vision_num_heads: 16
+
+training:
+  # Fine-tuning specific hypers
+  batch_size: 1
+  gradient_accumulation_steps: 256 # Even larger global batch for stability
+  max_steps: 50000                 # Shorter duration than pre-train
+  learning_rate: 1e-5             # 10x smaller than pre-train
+  min_learning_rate: 1e-6
+  warmup_steps: 500
+  weight_decay: 0.05
+  mixed_precision: "bf16"
+  gradient_checkpointing: true
+  max_seq_len: 32768
+  
+  # Fine-tuning data
+  data_sources:
+    - "data/llava_instruct_150k.json"
+    - "data/sharegpt_multimodal.json"
+
+distributed:
+  distributed_backend: "nccl"
+  sharding_strategy: "FULL_SHARD"
+  tensor_parallel_size: 8
+  pipeline_parallel_size: 8
+  expert_parallel_size: 16
+  data_parallel_size: 256 # Scale up DP for fine-tuning
