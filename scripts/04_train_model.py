@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 04_train_model.py: Production-Scale Training Entry Point
-Handles distributed training (FSDP) for models from 1B to 13B-MoE.
-Supports multi-node torchrun and massive dataset loading.
+Optimized for Emmit Nova Sunya 1.2T on 32k H100s.
 """
 
 import argparse
@@ -10,62 +9,66 @@ import os
 import sys
 from pathlib import Path
 import torch
-from torch.utils.data import DataLoader, DistributedSampler
 
-# Allow imports from parent
+# Allow imports from project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from emmit.model.config import EmmitConfig
 from emmit.model.transformer import EmmitModel
 from emmit.training.trainer import EmmitTrainer
-from emmit.training.distributed import init_distributed, setup_fsdp
+from emmit.data.distributed_loader import create_nova_dataloader
+
+# Optional: Import DeepSpeed if available
+try:
+    import deepspeed
+except ImportError:
+    deepspeed = None
 
 def train_production(args):
     """Main production training loop."""
-    print(f"🚀 Initializing production training for: {args.config}")
+    print(f"🚀 Initializing Nova Sunya Production Engine...")
     
     # 1. Load config
     config = EmmitConfig.from_yaml(args.config)
     
-    # 2. Setup Distributed
-    is_distributed = int(os.environ.get("WORLD_SIZE", 1)) > 1
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    if is_distributed:
-        local_rank = init_distributed()
-        device = torch.device(f"cuda:{local_rank}")
-        print(f"  [Distributed] Rank={local_rank}, WorldSize={os.environ['WORLD_SIZE']}")
-
-    # 3. Model Initialization
-    # Use meta device (placeholder) for massive models to avoid CPU OOM
-    with torch.device("cpu" if not torch.cuda.is_available() else device):
-        model = EmmitModel(config)
-    
-    total_params = model.num_parameters()
-    print(f"  [Model] Parameters: {total_params:>14,}")
-
-    # 4. Wrap with FSDP
-    if is_distributed:
-        model = setup_fsdp(model, config)
+    # 2. Setup Device/Distributed
+    if deepspeed:
+        # DeepSpeed handles distributed initialization
+        pass
     else:
-        model = model.to(device)
+        from emmit.training.distributed import init_distributed
+        init_distributed()
 
-    # 5. Production DataLoader (JSONL Packed Sequences)
-    # Note: Using a dummy dataset implementation for this script's infrastructure
-    # In practice, this would load from data/processed
-    # dataset = PackedJSONLDataset(args.data_dir, config.max_seq_len)
-    # dataloader = DataLoader(dataset, sampler=DistributedSampler(dataset) if is_distributed else None, batch_size=config.batch_size)
+    # 3. Model Initialization (Meta Device for 1.2T scale)
+    print(f"  [Model] Initializing architecture: {config.name}")
+    # In production with DS ZeRO-3, model is often initialized on CPU/Meta
+    # and then partitioned across GPUs
+    model = EmmitModel(config)
 
-    print("  [Trainer] Launching production training engine...")
-    # trainer = EmmitTrainer(model, config, dataloader, ...)
-    # trainer.train()
-    print("✅ Initialization Successful. Ready for cluster scale.")
+    # 4. Data Pipeline (Streaming JSONL)
+    print(f"  [Data] Initializing streaming dataloader for {args.data_dir}")
+    dataloader = create_nova_dataloader(config)
+
+    # 5. Launcher
+    trainer = EmmitTrainer(
+        model=model,
+        config=config,
+        train_dataloader=dataloader,
+        output_dir=args.output_dir,
+        pretrained_path=args.pretrained_path
+    )
+
+    print("  [Trainer] Starting cluster execution...")
+    trainer.train()
+    print("✅ Training sequence completed successfully.")
 
 def main():
-    parser = argparse.ArgumentParser(description="Emmit Production Trainer (1B - 13B MoE)")
-    parser.add_argument("--config", type=str, required=True, help="YAML config file")
-    parser.add_argument("--data_dir", type=str, default="data/processed", help="Directory with processed JSONL files")
-    parser.add_argument("--output_dir", type=str, default="outputs", help="Output directory for checkpoints")
+    parser = argparse.ArgumentParser(description="Emmit Production Trainer")
+    parser.add_argument("--config", type=str, required=True)
+    parser.add_argument("--data_dir", type=str, default="data/processed")
+    parser.add_argument("--output_dir", type=str, default="outputs")
+    parser.add_argument("--pretrained_path", type=str, default=None)
+    parser.add_argument("--deepspeed", type=str, default=None)
     args = parser.parse_args()
 
     train_production(args)

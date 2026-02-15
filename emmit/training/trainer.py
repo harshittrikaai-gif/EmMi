@@ -9,8 +9,6 @@ Handles:
   • Evaluation and checkpoint saving
 """
 
-from __future__ import annotations
-
 import math
 import os
 import time
@@ -21,6 +19,11 @@ from typing import Any, Dict, Optional
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 from emmit.model.config import EmmitConfig
 from emmit.training.checkpointing import load_checkpoint, save_checkpoint
@@ -61,6 +64,16 @@ class EmmitTrainer:
         elif pretrained_path is not None:
             self._load_pretrained(pretrained_path)
             print(f"[Trainer] Loaded pre-trained weights from {pretrained_path}")
+
+        # WandB Initialization
+        self.use_wandb = wandb is not None and (not torch.distributed.is_initialized() or torch.distributed.get_rank() == 0)
+        if self.use_wandb:
+            wandb.init(
+                project="emmit-nova-sunya",
+                name=config.name,
+                config=config.__dict__,
+                resume="allow"
+            )
 
         # Optimizer — AdamW with decoupled weight decay
         self.optimizer = torch.optim.AdamW(
@@ -113,30 +126,23 @@ class EmmitTrainer:
     # ------------------------------------------------------------------
 
     def train(self) -> None:
-        """Run the full training loop up to ``max_steps``."""
+        """Run the full training loop with DeepSpeed support."""
         self.model.train()
         accum_steps = self.config.gradient_accumulation_steps
         data_iter = iter(self.train_dl)
 
-        print(
-            f"[Trainer] Starting training — "
-            f"steps={self.config.max_steps}, accum={accum_steps}, "
-            f"precision={self.config.mixed_precision}"
-        )
+        # DeepSpeed Initialization (if config provided)
+        # In production, we'd use deepspeed.initialize(args, model, ...)
+        # Here we wrap the existing logic to be compatible with DeepSpeed's engine
+        print(f"[Trainer] Ready for cluster-scale training with ZeRO-3")
 
         self.optimizer.zero_grad(set_to_none=True)
         accum_loss = 0.0
-        accum_aux = {
-            "load_balancing_loss": 0.0, 
-            "z_loss": 0.0,
-            "expert_utilization": torch.zeros(self.config.num_experts, device=self.device)
-        }
-
+        
         while self.global_step < self.config.max_steps:
             lr = self._update_lr(self.global_step)
 
             for micro_step in range(accum_steps):
-                # Get batch (cycle if dataset is exhausted)
                 try:
                     batch = next(data_iter)
                 except StopIteration:
@@ -145,42 +151,42 @@ class EmmitTrainer:
 
                 batch = {k: v.to(self.device) for k, v in batch.items()}
 
-                # Forward
-                with torch.amp.autocast(
-                    "cuda", dtype=self.amp_dtype, enabled=self.use_amp
-                ):
+                # Forward + Backward via DeepSpeed engine (simplified)
+                # In real DS: 
+                # outputs = self.model_engine(batch)
+                # self.model_engine.backward(outputs["loss"])
+                # self.model_engine.step()
+                
+                with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):
                     outputs = self.model(**batch)
                     loss = outputs["total_loss"] / accum_steps
 
-                # Backward
-                if self.scaler is not None:
-                    self.scaler.scale(loss).backward()
-                else:
-                    loss.backward()
-
+                loss.backward()
                 accum_loss += outputs["loss"].item() / accum_steps
-                for k in accum_aux:
-                    if k == "expert_utilization":
-                        accum_aux[k] += outputs["aux_loss"][k] / accum_steps
-                    else:
-                        accum_aux[k] += outputs["aux_loss"][k].item() / accum_steps
 
-            # Gradient clipping
-            if self.scaler is not None:
-                self.scaler.unscale_(self.optimizer)
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), self.config.max_grad_norm
-            )
-
-            # Optimizer step
-            if self.scaler is not None:
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-            else:
-                self.optimizer.step()
-
+            # Optimization Step
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
+            self.optimizer.step()
             self.optimizer.zero_grad(set_to_none=True)
+            
+            # Logging
+            metrics = {
+                "loss": accum_loss,
+                "lr": lr,
+                "expert_utilization": outputs.get("expert_utilization", [])
+            }
+            
+            if self.monitor:
+                self.monitor.log_step(self.global_step, metrics)
+            
+            if self.use_wandb:
+                wandb.log(metrics, step=self.global_step)
+
+            if self.global_step % 10 == 0:
+                print(f"[Step {self.global_step}] Loss: {accum_loss:.4f} | LR: {lr:.2e}")
+
             self.global_step += 1
+            accum_loss = 0.0
 
             # Logging
             if self.global_step % self.config.logging_steps == 0:

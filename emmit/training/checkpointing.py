@@ -22,44 +22,45 @@ def save_checkpoint(
     output_dir: str | Path,
     scheduler: Optional[object] = None,
     max_keep: int = 3,
+    is_fsdp: bool = False
 ) -> Path:
     """
-    Persist a full training checkpoint.
-
-    Args:
-        model:      the (possibly FSDP-wrapped) model
-        optimizer:  optimizer with state_dict
-        step:       global training step
-        output_dir: directory to write checkpoints to
-        scheduler:  optional LR scheduler
-        max_keep:   number of most-recent checkpoints to retain
-
-    Returns:
-        Path to the saved checkpoint file.
+    Persist a full training checkpoint. Supports sharded state-dicts for FSDP.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    state = {
-        "step": step,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": optimizer.state_dict(),
-        "rng_state": torch.get_rng_state(),
-    }
+    if is_fsdp:
+        # Sharded state dict for massive model reliability
+        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.distributed.fsdp import StateDictType
+        
+        with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
+            state = {
+                "step": step,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": FSDP.optim_state_dict(model, optimizer),
+                "rng_state": torch.get_rng_state(),
+            }
+            ckpt_path = output_dir / f"checkpoint_{step}_rank{torch.distributed.get_rank()}.pt"
+            torch.save(state, ckpt_path)
+    else:
+        state = {
+            "step": step,
+            "model_state_dict": model.state_dict(),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "rng_state": torch.get_rng_state(),
+        }
+        if torch.cuda.is_available():
+            state["cuda_rng_state"] = torch.cuda.get_rng_state_all()
+        if scheduler is not None and hasattr(scheduler, "state_dict"):
+            state["scheduler_state_dict"] = scheduler.state_dict()
+        
+        ckpt_path = output_dir / f"checkpoint_{step}.pt"
+        torch.save(state, ckpt_path)
 
-    if torch.cuda.is_available():
-        state["cuda_rng_state"] = torch.cuda.get_rng_state_all()
-
-    if scheduler is not None and hasattr(scheduler, "state_dict"):
-        state["scheduler_state_dict"] = scheduler.state_dict()
-
-    ckpt_path = output_dir / f"checkpoint_{step}.pt"
-    torch.save(state, ckpt_path)
     print(f"[Checkpoint] Saved → {ckpt_path}")
-
-    # Prune old checkpoints
     _cleanup_old_checkpoints(output_dir, max_keep)
-
     return ckpt_path
 
 
